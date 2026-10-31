@@ -21,8 +21,10 @@ export async function GET(request: NextRequest) {
   const staleCutoff = new Date(now - STALE_MS);
   const signalCutoff = new Date(now - SIGNAL_TTL_MS);
 
-  // 1) Heartbeat — refresh lastSeen for the caller.
-  await prisma.presence.updateMany({
+  // 1) Heartbeat — refresh lastSeen for the caller. A zero count means their
+  // row was reaped or removed (throttled tab, sleep, pagehide) — the client
+  // re-joins when told it isn't present.
+  const { count } = await prisma.presence.updateMany({
     where: { id },
     data: { lastSeen: new Date(now) },
   });
@@ -54,6 +56,7 @@ export async function GET(request: NextRequest) {
   }
 
   const response: PollResponse = {
+    present: count > 0,
     peers: peers.map((p) => ({
       id: p.id,
       lat: p.lat,

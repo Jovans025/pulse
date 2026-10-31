@@ -33,6 +33,10 @@ export default function Home() {
   const [myLocation, setMyLocation] = useState<{ lat: number; lng: number } | null>(
     null,
   );
+  const myLocationRef = useRef(myLocation);
+  useEffect(() => {
+    myLocationRef.current = myLocation;
+  });
 
   const [conn, _setConn] = useState<Conn>({ kind: "idle" });
   const connRef = useRef<Conn>(conn);
@@ -289,6 +293,11 @@ export default function Home() {
       try {
         const data = await poll(sessionId);
         if (!active) return;
+        // Our row was reaped — put the dot back. Any live P2P chat is unaffected.
+        if (!data.present && myLocationRef.current) {
+          const { lat, lng } = myLocationRef.current;
+          await join(sessionId, lat, lng);
+        }
         setPeers(data.peers);
         for (const s of data.signals) processSignalRef.current(s);
       } catch {}

@@ -27,6 +27,7 @@ export interface SignalMsg {
 }
 
 export interface PollResponse {
+  present: boolean; // false → caller has no presence row and must re-join
   peers: PeerDot[];
   signals: SignalMsg[];
 }
