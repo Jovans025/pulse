@@ -20,8 +20,15 @@ const MAX_PAYLOAD = 64 * 1024; // SDP/ICE are small; cap to be safe.
 
 // POST /api/signal — body { toId, type, payload? }. The sender is whoever owns
 // the session token; a client can't claim to be someone else.
-// Drops one message into the recipient's mailbox. Also manages the `busy`
-// flag so a user can only be in one connection at a time.
+//
+// Relaying is gated on server-side pairing (Presence.requestedId / peerId), so
+// a session can only:
+//   request  someone, when neither side is already in a connection
+//   accept / decline  a request that was actually sent to it
+//   offer / answer / ice  its current partner
+//   end      its partner, or its own pending request
+// Each check is a single conditional updateMany (atomic per row), so it holds
+// under concurrency without interactive transactions over the pooler.
 export async function POST(request: NextRequest) {
   let body: unknown;
   try {
@@ -51,49 +58,121 @@ export async function POST(request: NextRequest) {
   const signalType = type as SignalType;
   const payloadStr = typeof payload === "string" ? payload : null;
 
-  // Enforce "one active connection at a time": if the target is already busy,
-  // auto-decline the request instead of delivering it.
-  if (signalType === "request") {
-    const target = await prisma.presence.findUnique({
-      where: { id: toId },
-      select: { busy: true },
-    });
-    if (!target) {
-      // Target went offline — tell the initiator it was declined.
-      await sendDecline(toId, fromId);
-      return Response.json({ ok: true, autoDeclined: true });
+  switch (signalType) {
+    case "request": {
+      // Claim the outgoing slot: only if we're present and not connected.
+      const claimed = await prisma.presence.updateMany({
+        where: { id: fromId, peerId: null },
+        data: { requestedId: toId },
+      });
+      if (claimed.count === 0) return conflict("already in a connection");
+
+      const target = await prisma.presence.findUnique({
+        where: { id: toId },
+        select: { peerId: true },
+      });
+      // Offline or busy: give the slot back and auto-decline.
+      if (!target || target.peerId !== null) {
+        await prisma.presence.updateMany({
+          where: { id: fromId, requestedId: toId },
+          data: { requestedId: null },
+        });
+        await deliver(toId, fromId, "decline");
+        return Response.json({ ok: true, autoDeclined: true });
+      }
+      break;
     }
-    if (target.busy) {
-      await sendDecline(toId, fromId);
-      return Response.json({ ok: true, autoDeclined: true });
+
+    case "accept": {
+      // Only a request that was really sent to us can be accepted.
+      const requester = await prisma.presence.updateMany({
+        where: { id: toId, requestedId: fromId, peerId: null },
+        data: { requestedId: null, peerId: fromId, busy: true },
+      });
+      if (requester.count === 0) return forbidden();
+      const me = await prisma.presence.updateMany({
+        where: { id: fromId, peerId: null },
+        data: { requestedId: null, peerId: toId, busy: true },
+      });
+      if (me.count === 0) {
+        // We'd paired with someone else meanwhile: undo the requester side.
+        await prisma.presence.updateMany({
+          where: { id: toId, peerId: fromId },
+          data: { peerId: null, busy: false },
+        });
+        return conflict("already in a connection");
+      }
+      break;
+    }
+
+    case "decline": {
+      // Clears their pending request. Never touches `busy`: the decliner may
+      // be mid-call with someone else.
+      const cleared = await prisma.presence.updateMany({
+        where: { id: toId, requestedId: fromId },
+        data: { requestedId: null },
+      });
+      if (cleared.count === 0) return forbidden();
+      break;
+    }
+
+    case "offer":
+    case "answer":
+    case "ice": {
+      if (!payloadStr) {
+        return Response.json({ error: "missing payload" }, { status: 400 });
+      }
+      const paired = await prisma.presence.count({
+        where: { id: fromId, peerId: toId },
+      });
+      if (paired === 0) return forbidden();
+      break;
+    }
+
+    case "end": {
+      // Hang up on our partner…
+      const hungUp = await prisma.presence.updateMany({
+        where: { id: fromId, peerId: toId },
+        data: { peerId: null, busy: false },
+      });
+      if (hungUp.count > 0) {
+        await prisma.presence.updateMany({
+          where: { id: toId, peerId: fromId },
+          data: { peerId: null, busy: false },
+        });
+        break;
+      }
+      // …or withdraw our own pending request.
+      const withdrawn = await prisma.presence.updateMany({
+        where: { id: fromId, requestedId: toId },
+        data: { requestedId: null },
+      });
+      if (withdrawn.count > 0) break;
+      // Nothing to end (e.g. the other side already left and cleaned up).
+      return Response.json({ ok: true, noop: true });
     }
   }
 
-  // Busy transitions:
-  // - accept: the connection is now active → mark BOTH peers busy.
-  // - decline/end: free both peers.
-  if (signalType === "accept") {
-    await prisma.presence.updateMany({
-      where: { id: { in: [fromId, toId] } },
-      data: { busy: true },
-    });
-  } else if (signalType === "decline" || signalType === "end") {
-    await prisma.presence.updateMany({
-      where: { id: { in: [fromId, toId] } },
-      data: { busy: false },
-    });
-  }
-
-  await prisma.signal.create({
-    data: { fromId, toId, type: signalType, payload: payloadStr },
-  });
-
+  // Signaling payloads only travel with offer / answer / ice.
+  const carriesPayload =
+    signalType === "offer" || signalType === "answer" || signalType === "ice";
+  await deliver(fromId, toId, signalType, carriesPayload ? payloadStr : null);
   return Response.json({ ok: true });
 }
 
-// Helper: deliver an auto-decline from `target` back to `initiator`.
-async function sendDecline(targetId: string, initiatorId: string) {
-  await prisma.signal.create({
-    data: { fromId: targetId, toId: initiatorId, type: "decline", payload: null },
-  });
+async function deliver(
+  fromId: string,
+  toId: string,
+  type: SignalType,
+  payload: string | null = null,
+) {
+  await prisma.signal.create({ data: { fromId, toId, type, payload } });
+}
+
+function forbidden() {
+  return Response.json({ error: "not allowed" }, { status: 403 });
+}
+
+function conflict(error: string) {
+  return Response.json({ error }, { status: 409 });
 }

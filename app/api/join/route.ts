@@ -44,5 +44,18 @@ export async function POST(request: NextRequest) {
     },
   });
 
+  // Re-joining mid-chat (our row was reaped while the P2P line stayed up):
+  // restore the pairing our partner still holds, so signaling keeps working.
+  const partner = await prisma.presence.findFirst({
+    where: { peerId: id },
+    select: { id: true },
+  });
+  if (partner) {
+    await prisma.presence.updateMany({
+      where: { id, peerId: null },
+      data: { peerId: partner.id, busy: true },
+    });
+  }
+
   return Response.json({ ok: true });
 }

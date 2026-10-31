@@ -17,8 +17,14 @@ model Presence {
   lng      Float
   busy     Boolean  @default(false) // true while in an active connection
   lastSeen DateTime
+  // Server-side pairing, so signaling is only relayed between two sessions
+  // that actually agreed to talk:
+  requestedId String? // pending outgoing request to this public id
+  peerId      String? // connected with this public id (set on accept)
 
   @@index([lastSeen])
+  @@index([requestedId])
+  @@index([peerId])
 }
 
 model Signal {
