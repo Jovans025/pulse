@@ -11,7 +11,7 @@ import OnlineHud from "./components/OnlineHud";
 import { dotColor } from "@/lib/colors";
 import { describeLocalTime, distanceKm, formatDistance } from "@/lib/geo";
 import { playChime } from "@/lib/chime";
-import { join, leave, poll, sendSignal } from "@/lib/api";
+import { join, leave, newSessionToken, poll, sendSignal } from "@/lib/api";
 import { PeerSession, type DescType, type PeerControl } from "@/lib/webrtc";
 import { POLL_INTERVAL_MS } from "@/lib/presence";
 import { type PeerDot, type SignalMsg } from "@/lib/types";
@@ -32,7 +32,8 @@ const GATE_POLL_INTERVAL_MS = 5_000;
 
 export default function Home() {
   const [phase, setPhase] = useState<"gate" | "live">("gate");
-  const [sessionId] = useState(() => crypto.randomUUID());
+  // Secret for this session; the server derives our public id from it.
+  const [sessionToken] = useState(() => newSessionToken());
   const [peers, setPeers] = useState<PeerDot[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
@@ -181,7 +182,7 @@ export default function Home() {
     theyGotOurs.current = false;
     const ps = new PeerSession(initiator, {
       onSignal: (type: DescType, payload: string) => {
-        void sendSignal(sessionId, peerId, type, payload);
+        void sendSignal(sessionToken, peerId, type, payload);
       },
       onChat: (text) => {
         setPeerTyping(false);
@@ -225,7 +226,7 @@ export default function Home() {
       (c.kind === "connecting" || c.kind === "connected") &&
       c.peerId === peerId
     ) {
-      void sendSignal(sessionId, peerId, "end");
+      void sendSignal(sessionToken, peerId, "end");
       peerLeft(peerId, message);
     }
   }
@@ -284,13 +285,13 @@ export default function Home() {
     if (connRef.current.kind !== "idle") return;
     dismissEndedChat();
     setConn({ kind: "requesting", peerId });
-    void sendSignal(sessionId, peerId, "request");
+    void sendSignal(sessionToken, peerId, "request");
     requestTimer.current = setTimeout(() => {
       if (
         connRef.current.kind === "requesting" &&
         connRef.current.peerId === peerId
       ) {
-        void sendSignal(sessionId, peerId, "end");
+        void sendSignal(sessionToken, peerId, "end");
         teardown("No answer.");
       }
     }, REQUEST_TIMEOUT_MS);
@@ -298,7 +299,7 @@ export default function Home() {
 
   function cancelRequest() {
     if (connRef.current.kind === "requesting") {
-      void sendSignal(sessionId, connRef.current.peerId, "end");
+      void sendSignal(sessionToken, connRef.current.peerId, "end");
     }
     teardown();
   }
@@ -307,20 +308,20 @@ export default function Home() {
     if (connRef.current.kind !== "incoming") return;
     const peerId = connRef.current.peerId;
     startPeer(peerId, false);
-    void sendSignal(sessionId, peerId, "accept");
+    void sendSignal(sessionToken, peerId, "accept");
     setConn({ kind: "connecting", peerId });
   }
 
   function declineIncoming() {
     if (connRef.current.kind !== "incoming") return;
-    void sendSignal(sessionId, connRef.current.peerId, "decline");
+    void sendSignal(sessionToken, connRef.current.peerId, "decline");
     setConn({ kind: "idle" });
   }
 
   function endConnection() {
     const c = connRef.current;
     if (c.kind === "connecting" || c.kind === "connected") {
-      void sendSignal(sessionId, c.peerId, "end");
+      void sendSignal(sessionToken, c.peerId, "end");
     }
     teardown();
   }
@@ -392,7 +393,7 @@ export default function Home() {
           setConn({ kind: "incoming", peerId: sig.fromId });
           playChime();
         } else {
-          void sendSignal(sessionId, sig.fromId, "decline");
+          void sendSignal(sessionToken, sig.fromId, "decline");
         }
         break;
       }
@@ -447,7 +448,7 @@ export default function Home() {
   // Polls on the entry screen too (slower, read-only) so the globe behind it
   // already shows who's online.
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionToken) return;
     const live = phase === "live";
     const interval = live ? POLL_INTERVAL_MS : GATE_POLL_INTERVAL_MS;
     let active = true;
@@ -455,14 +456,14 @@ export default function Home() {
 
     const tick = async () => {
       try {
-        const data = await poll(sessionId);
+        const data = await poll(sessionToken);
         if (!active) return;
         setPeers(data.peers);
         if (live) {
           // Our row was reaped — put the dot back. Any live P2P chat is unaffected.
           if (!data.present && myLocationRef.current) {
             const { lat, lng } = myLocationRef.current;
-            await join(sessionId, lat, lng);
+            await join(sessionToken, lat, lng);
           }
           for (const s of data.signals) processSignalRef.current(s);
         }
@@ -475,13 +476,13 @@ export default function Home() {
       active = false;
       if (timer) clearTimeout(timer);
     };
-  }, [phase, sessionId]);
+  }, [phase, sessionToken]);
 
   useEffect(() => {
-    if (!sessionId || phase !== "live") return;
+    if (!sessionToken || phase !== "live") return;
     const onLeave = () => {
       const c = connRef.current;
-      leave(sessionId, c.kind === "idle" ? undefined : c.peerId);
+      leave(sessionToken, c.kind === "idle" ? undefined : c.peerId);
     };
     window.addEventListener("pagehide", onLeave);
     window.addEventListener("beforeunload", onLeave);
@@ -489,11 +490,11 @@ export default function Home() {
       window.removeEventListener("pagehide", onLeave);
       window.removeEventListener("beforeunload", onLeave);
     };
-  }, [sessionId, phase]);
+  }, [sessionToken, phase]);
 
   async function handleReady(lat: number, lng: number) {
     setMyLocation({ lat, lng });
-    await join(sessionId, lat, lng);
+    await join(sessionToken, lat, lng);
     setPhase("live");
   }
 

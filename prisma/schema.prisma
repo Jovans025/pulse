@@ -12,7 +12,7 @@ datasource db {
 }
 
 model Presence {
-  id       String   @id // client-generated session uuid
+  id       String   @id // public id = sha256(session token), see lib/session.ts
   lat      Float // ALREADY privacy-offset coords (raw is never stored)
   lng      Float
   busy     Boolean  @default(false) // true while in an active connection
