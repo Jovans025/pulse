@@ -35,6 +35,8 @@ export default function Home() {
   // Secret for this session; the server derives our public id from it.
   const [sessionToken] = useState(() => newSessionToken());
   const [peers, setPeers] = useState<PeerDot[]>([]);
+  // False until the first poll lands, so the map knows who was already here.
+  const [peersLoaded, setPeersLoaded] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -459,6 +461,7 @@ export default function Home() {
         const data = await poll(sessionToken);
         if (!active) return;
         setPeers(data.peers);
+        setPeersLoaded(true);
         if (live) {
           // Our row was reaped — put the dot back. Any live P2P chat is unaffected.
           if (!data.present && myLocationRef.current) {
@@ -507,6 +510,7 @@ export default function Home() {
         me={myLocation}
         onPeerClick={requestConnection}
         canConnect={phase === "live" && conn.kind === "idle"}
+        peersLoaded={peersLoaded}
         link={
           connPeerId
             ? {

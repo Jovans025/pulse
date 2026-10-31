@@ -30,12 +30,16 @@ const DEG_PER_SEC = 4;
 const NIGHT_REFRESH_MS = 60_000;
 const NIGHT_IMAGE_SIZE = 512;
 
+// How long a newcomer's arrival ripple plays (matches the CSS animation).
+const ARRIVAL_MS = 2600;
+
 export default function WorldMap({
   peers,
   me,
   onPeerClick,
   canConnect,
   link = null,
+  peersLoaded = true,
 }: {
   peers: PeerDot[];
   me: { lat: number; lng: number } | null;
@@ -44,6 +48,8 @@ export default function WorldMap({
   // The stranger you're connecting with, if any. `pending` = not yet
   // accepted; `incoming` = they reached out, so the arc draws from them.
   link?: { peerId: string; pending: boolean; incoming: boolean } | null;
+  // Whether `peers` reflects a real poll yet (vs the initial empty list).
+  peersLoaded?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapboxMap | null>(null);
@@ -190,6 +196,10 @@ export default function WorldMap({
     };
   }, [me, ready]);
 
+  // Dots present on the first draw are already "here"; only later arrivals
+  // ripple.
+  const populatedRef = useRef(false);
+
   // Reconcile markers whenever the peer list changes (or the map becomes ready).
   useEffect(() => {
     const map = mapRef.current;
@@ -220,6 +230,11 @@ export default function WorldMap({
             .setLngLat([peer.lng, peer.lat])
             .addTo(map);
           markers.set(peer.id, marker);
+          // Someone just arrived: send a ripple out across the globe.
+          if (populatedRef.current) {
+            el.classList.add("is-arriving");
+            window.setTimeout(() => el.classList.remove("is-arriving"), ARRIVAL_MS);
+          }
         }
         // A class, not inline opacity: on the globe Mapbox drives each
         // marker's opacity itself (fading dots round the far side).
@@ -229,6 +244,9 @@ export default function WorldMap({
           .getElement()
           .classList.toggle("is-night", sunElevation(peer.lat, peer.lng, sun) < -6);
       }
+
+      // Everyone in the first real poll was already here: no ripple for them.
+      if (peersLoaded) populatedRef.current = true;
 
       // Drop markers for peers that went offline / got filtered out.
       for (const [id, marker] of markers) {
@@ -242,7 +260,7 @@ export default function WorldMap({
     return () => {
       cancelled = true;
     };
-  }, [peers, ready]);
+  }, [peers, ready, peersLoaded]);
 
   // Keep the day/night line moving.
   useEffect(() => {

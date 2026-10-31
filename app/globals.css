@@ -56,6 +56,33 @@ body {
   box-shadow: none;
 }
 
+/* Someone just arrived: two rings ripple out from their light. */
+.pulse-dot.is-arriving::before,
+.pulse-dot.is-arriving::after {
+  content: "";
+  position: absolute;
+  inset: -1.5px;
+  border-radius: 9999px;
+  border: 2px solid currentColor;
+  pointer-events: none;
+  animation: arrive 1.9s cubic-bezier(0.2, 0.6, 0.3, 1) both;
+}
+
+.pulse-dot.is-arriving::after {
+  animation-delay: 0.5s;
+}
+
+@keyframes arrive {
+  from {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  to {
+    transform: scale(8);
+    opacity: 0;
+  }
+}
+
 /* The dot whose card is open. */
 .pulse-dot.is-selected {
   transform: scale(1.5);
@@ -219,6 +246,11 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .pulse-dot.is-arriving::before,
+  .pulse-dot.is-arriving::after {
+    display: none;
+  }
+
   .pulse-dot,
   .pulse-me-ring,
   .animate-rise-in,
