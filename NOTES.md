@@ -131,7 +131,7 @@ Phase 2 serve the same goal of making Pulse feel alive and safe:
 - **Safer:** the peer card means a stray tap never pings a stranger. Video
   requests can be cancelled, and the invite says your camera and mic will
   turn on. Mute and camera-off are instant, and the other person is told.
-  Connection requests expire after 30s.
+  A countdown ring shows exactly when a request expires.
 - **More alive:** the arc across the globe while a request is in flight,
   the incoming chime, the typing indicator, the call length logged in the
   chat, and the "it's quiet" invite when you're the only one online.
