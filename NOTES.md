@@ -130,14 +130,3 @@ doesn't feel alive. Real sunlight makes the planet itself feel present
 ("it's 3 AM there and they're still up"), it fits the night-owl mood of
 talking to strangers, and it **works even when you're the only one online**.
 That matters, because a reviewer often tests alone.
-
-**Next, with more time:**
-- **Live conversations:** faint arcs between every pair currently talking, so
-  you can see the planet talking (designed and prototyped, held back for
-  now).
-- **Consent-first video:** the other person's video starts blurred until you
-  choose to reveal it, plus one-tap block (enforced by the server, per
-  session). Optionally on-device nudity detection that re-blurs, with no
-  frames leaving the device.
-- **Icebreakers:** a shared opening question for both people when a chat
-  starts.
