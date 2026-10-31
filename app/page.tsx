@@ -21,6 +21,7 @@ type Conn =
 type VideoState = "none" | "requesting" | "incoming" | "active";
 
 const REQUEST_TIMEOUT_MS = 30_000;
+const GATE_POLL_INTERVAL_MS = 5_000;
 
 export default function Home() {
   const [phase, setPhase] = useState<"gate" | "live">("gate");
@@ -284,8 +285,12 @@ export default function Home() {
     processSignalRef.current = processSignal;
   });
 
+  // Polls on the entry screen too (slower, read-only) so the globe behind it
+  // already shows who's online.
   useEffect(() => {
-    if (phase !== "live" || !sessionId) return;
+    if (!sessionId) return;
+    const live = phase === "live";
+    const interval = live ? POLL_INTERVAL_MS : GATE_POLL_INTERVAL_MS;
     let active = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -293,15 +298,17 @@ export default function Home() {
       try {
         const data = await poll(sessionId);
         if (!active) return;
-        // Our row was reaped — put the dot back. Any live P2P chat is unaffected.
-        if (!data.present && myLocationRef.current) {
-          const { lat, lng } = myLocationRef.current;
-          await join(sessionId, lat, lng);
-        }
         setPeers(data.peers);
-        for (const s of data.signals) processSignalRef.current(s);
+        if (live) {
+          // Our row was reaped — put the dot back. Any live P2P chat is unaffected.
+          if (!data.present && myLocationRef.current) {
+            const { lat, lng } = myLocationRef.current;
+            await join(sessionId, lat, lng);
+          }
+          for (const s of data.signals) processSignalRef.current(s);
+        }
       } catch {}
-      if (active) timer = setTimeout(tick, POLL_INTERVAL_MS);
+      if (active) timer = setTimeout(tick, interval);
     };
     tick();
 
@@ -331,10 +338,6 @@ export default function Home() {
     setPhase("live");
   }
 
-  if (phase === "gate") {
-    return <EntryGate onReady={handleReady} />;
-  }
-
   const inChat = conn.kind === "connecting" || conn.kind === "connected";
 
   return (
@@ -343,8 +346,13 @@ export default function Home() {
         peers={peers}
         me={myLocation}
         onPeerClick={requestConnection}
-        canConnect={conn.kind === "idle"}
+        canConnect={phase === "live" && conn.kind === "idle"}
+        showHud={phase === "live"}
       />
+
+      {phase === "gate" && (
+        <EntryGate onReady={handleReady} onlineCount={peers.length} />
+      )}
 
       {notice && (
         <div className="absolute left-1/2 top-20 z-30 -translate-x-1/2 rounded-full bg-zinc-800/90 px-4 py-2 text-sm text-zinc-100 shadow-lg backdrop-blur">
