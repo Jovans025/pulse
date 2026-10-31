@@ -166,11 +166,50 @@ body {
   transform-origin: bottom center;
 }
 
+/* Chat: messages slide up into place; typing dots bob. */
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-msg-in {
+  animation: msg-in 0.2s ease-out both;
+}
+
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.6);
+  animation: typing 1s ease-in-out infinite;
+}
+
+@keyframes typing {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  30% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .pulse-dot,
   .pulse-me-ring,
   .animate-rise-in,
-  .animate-pop-in {
+  .animate-pop-in,
+  .animate-msg-in,
+  .typing-dot {
     animation: none;
   }
 }

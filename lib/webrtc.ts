@@ -8,6 +8,7 @@ export type PeerControl =
 interface PeerCallbacks {
   onSignal: (type: DescType, payload: string) => void;
   onChat: (text: string) => void;
+  onTyping: () => void;
   onControl: (ctrl: PeerControl) => void;
   onRemoteStream: (stream: MediaStream | null) => void;
   onConnectionState: (state: RTCPeerConnectionState) => void;
@@ -83,6 +84,8 @@ export class PeerSession {
         const msg = JSON.parse(e.data as string);
         if (msg.t === "chat" && typeof msg.text === "string") {
           this.cb.onChat(msg.text);
+        } else if (msg.t === "typing") {
+          this.cb.onTyping();
         } else if (msg.t === "ctrl" && typeof msg.ctrl === "string") {
           this.cb.onControl(msg.ctrl as PeerControl);
         }
@@ -136,6 +139,11 @@ export class PeerSession {
 
   sendChat(text: string) {
     this.safeSend({ t: "chat", text });
+  }
+
+  // "I'm typing" ping. Callers throttle; the receiver shows it briefly.
+  sendTyping() {
+    this.safeSend({ t: "typing" });
   }
 
   sendControl(ctrl: PeerControl) {

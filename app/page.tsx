@@ -25,6 +25,8 @@ type Conn =
 type VideoState = "none" | "requesting" | "incoming" | "active";
 
 const REQUEST_TIMEOUT_MS = 30_000;
+const TYPING_SHOW_MS = 3_000; // how long "typing…" lingers after the last ping
+const TYPING_SEND_MS = 1_500; // min gap between our own typing pings
 const GATE_POLL_INTERVAL_MS = 5_000;
 
 export default function Home() {
@@ -59,6 +61,15 @@ export default function Home() {
 
   const peerRef = useRef<PeerSession | null>(null);
   const msgId = useRef(0);
+  const [peerTyping, setPeerTyping] = useState(false);
+  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTypingSent = useRef(0);
+  // Set when the other side ends a chat: the conversation stays on screen with
+  // a closing note until you dismiss it.
+  const [chatEnded, setChatEnded] = useState<{
+    peerId: string;
+    reason: string;
+  } | null>(null);
   const requestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function showNotice(text: string) {
@@ -70,35 +81,67 @@ export default function Home() {
     setMessages((prev) => [...prev, { id: msgId.current++, mine, text }]);
   }
 
-  function teardown(message?: string) {
+  function teardown(message?: string, keepChat = false) {
     if (requestTimer.current) clearTimeout(requestTimer.current);
+    if (typingTimer.current) clearTimeout(typingTimer.current);
     peerRef.current?.close();
     peerRef.current = null;
     setLocalStream(null);
     setRemoteStream(null);
     setVideo("none");
-    setMessages([]);
+    setPeerTyping(false);
+    if (!keepChat) setMessages([]);
     setConn({ kind: "idle" });
     if (message) showNotice(message);
   }
 
+  // The other side ended things. Mid-chat, keep the conversation on screen with
+  // a closing note instead of snapping straight back to the map.
+  function peerLeft(peerId: string, reason: string) {
+    const wasChatting = connRef.current.kind === "connected";
+    teardown(wasChatting ? undefined : reason, wasChatting);
+    if (wasChatting) setChatEnded({ peerId, reason });
+  }
+
+  function dismissEndedChat() {
+    setChatEnded(null);
+    setMessages([]);
+  }
+
+  function notifyTyping() {
+    const now = Date.now();
+    if (now - lastTypingSent.current < TYPING_SEND_MS) return;
+    lastTypingSent.current = now;
+    peerRef.current?.sendTyping();
+  }
+
   function startPeer(peerId: string, initiator: boolean) {
+    setChatEnded(null);
+    setMessages([]);
     const ps = new PeerSession(initiator, {
       onSignal: (type: DescType, payload: string) => {
         void sendSignal(sessionId, peerId, type, payload);
       },
-      onChat: (text) => addMessage(false, text),
+      onChat: (text) => {
+        setPeerTyping(false);
+        addMessage(false, text);
+      },
+      onTyping: () => {
+        setPeerTyping(true);
+        if (typingTimer.current) clearTimeout(typingTimer.current);
+        typingTimer.current = setTimeout(() => setPeerTyping(false), TYPING_SHOW_MS);
+      },
       onControl: (ctrl) => handleControl(ctrl),
       onRemoteStream: (stream) => setRemoteStream(stream),
       onConnectionState: (state) => {
         if (state === "failed") {
-          peerLost(peerId, "Connection failed (network).");
+          peerLost(peerId, "The connection dropped.");
         }
       },
       onChannelOpen: () => {
         setConn({ kind: "connected", peerId });
       },
-      onChannelClose: () => peerLost(peerId, "Stranger disconnected."),
+      onChannelClose: () => peerLost(peerId, "They left the conversation."),
     });
     peerRef.current = ps;
   }
@@ -112,7 +155,7 @@ export default function Home() {
       c.peerId === peerId
     ) {
       void sendSignal(sessionId, peerId, "end");
-      teardown(message);
+      peerLeft(peerId, message);
     }
   }
 
@@ -153,6 +196,7 @@ export default function Home() {
 
   function requestConnection(peerId: string) {
     if (connRef.current.kind !== "idle") return;
+    dismissEndedChat();
     setConn({ kind: "requesting", peerId });
     void sendSignal(sessionId, peerId, "request");
     requestTimer.current = setTimeout(() => {
@@ -278,7 +322,7 @@ export default function Home() {
         if (c.kind !== "idle" && c.peerId === sig.fromId) {
           if (c.kind === "incoming") setConn({ kind: "idle" });
           else if (c.kind === "requesting") teardown("Stranger left.");
-          else teardown("Stranger disconnected.");
+          else peerLeft(sig.fromId, "They left the conversation.");
         }
         break;
       }
@@ -345,6 +389,8 @@ export default function Home() {
 
   const inChat = conn.kind === "connecting" || conn.kind === "connected";
   const connPeerId = conn.kind === "idle" ? null : conn.peerId;
+  // Whose chat is on screen: the live one, or one that just ended.
+  const chatPeerId = inChat ? conn.peerId : (chatEnded?.peerId ?? null);
 
   return (
     <main className="fixed inset-0 overflow-hidden">
@@ -397,17 +443,29 @@ export default function Home() {
         />
       )}
 
-      {inChat && (
+      {chatPeerId && (
         <ChatPanel
           messages={messages}
-          connected={conn.kind === "connected"}
+          status={
+            !inChat ? "ended" : conn.kind === "connected" ? "connected" : "connecting"
+          }
+          endedReason={chatEnded?.reason}
+          peer={peers.find((p) => p.id === chatPeerId)}
+          me={myLocation}
+          color={dotColor(chatPeerId)}
+          peerTyping={peerTyping}
           videoBusy={video !== "none"}
           onSend={(text) => {
             peerRef.current?.sendChat(text);
             addMessage(true, text);
+            // Receiving a message clears their "typing…", so let the next
+            // keystroke ping straight away.
+            lastTypingSent.current = 0;
           }}
+          onTyping={notifyTyping}
           onStartVideo={startVideoRequest}
           onEnd={endConnection}
+          onClose={dismissEndedChat}
         />
       )}
 
