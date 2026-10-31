@@ -112,16 +112,6 @@ asking what was missing:
   logged-in third session: forged accept / offer / decline get **403**, and
   ending someone else's call does nothing.
 
-**Not done yet (next, in this order):**
-- #3: derive the offset from the session token so it stays fixed for the
-  session. Already much harder now that #1 is closed (you can't force
-  someone off the map anymore).
-- #4: rate limits per IP and per session, in a small Postgres fixed-window
-  table, plus a per-user inbox cap.
-- #7: `frame-ancestors 'none'`, `Permissions-Policy`, `nosniff`.
-- Accepted by design: approximate dots are visible before you join (the map
-  is the product). STUN-only, no TURN (known limitation in the README).
-
 ## Phase 4 — Make it better: a living globe
 
 **What:** the globe now follows the **real sun**.
