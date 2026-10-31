@@ -7,6 +7,7 @@ import ChatPanel, { type ChatMessage } from "./components/ChatPanel";
 import VideoPanel from "./components/VideoPanel";
 import RequestingBar from "./components/RequestingBar";
 import InviteCard from "./components/InviteCard";
+import OnlineHud from "./components/OnlineHud";
 import { dotColor } from "@/lib/colors";
 import { describeLocalTime, distanceKm, formatDistance } from "@/lib/geo";
 import { playChime } from "@/lib/chime";
@@ -508,7 +509,6 @@ export default function Home() {
         me={myLocation}
         onPeerClick={requestConnection}
         canConnect={phase === "live" && conn.kind === "idle"}
-        showHud={phase === "live"}
         link={
           connPeerId
             ? {
@@ -519,6 +519,8 @@ export default function Home() {
             : null
         }
       />
+
+      {phase === "live" && <OnlineHud peers={peers} />}
 
       {phase === "gate" && (
         <EntryGate onReady={handleReady} onlineCount={peers.length} />

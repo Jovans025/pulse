@@ -19,14 +19,12 @@ export default function WorldMap({
   me,
   onPeerClick,
   canConnect,
-  showHud = true,
   link = null,
 }: {
   peers: PeerDot[];
   me: { lat: number; lng: number } | null;
   onPeerClick: (id: string) => void;
   canConnect: boolean;
-  showHud?: boolean;
   // The stranger you're connecting with, if any. `pending` = not yet
   // accepted; `incoming` = they reached out, so the arc draws from them.
   link?: { peerId: string; pending: boolean; incoming: boolean } | null;
@@ -409,12 +407,6 @@ export default function WorldMap({
         </div>
       )}
 
-      {/* Online count */}
-      {showHud && (
-        <div className="absolute bottom-4 left-4 rounded-full bg-zinc-900/80 px-3 py-1.5 text-xs text-zinc-300 backdrop-blur">
-          {peers.length} online
-        </div>
-      )}
     </div>
   );
 }
