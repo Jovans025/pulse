@@ -135,3 +135,8 @@ Phase 2 serve the same goal of making Pulse feel alive and safe:
 - **More alive:** the arc across the globe while a request is in flight,
   the incoming chime, the typing indicator, the call length logged in the
   chat, and the "it's quiet" invite when you're the only one online.
+- **Video call controls:** mute and unmute, camera on and off (the other
+  person sees "Muted" and "Their camera is off" instead of a frozen
+  frame), a mirrored self-view you can drag to any corner, chat as a
+  drawer during the call with an unread badge, and hanging up returns you
+  both to the text chat.
