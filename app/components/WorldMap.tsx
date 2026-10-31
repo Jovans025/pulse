@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import "mapbox-gl/dist/mapbox-gl.css";
 import type { Map as MapboxMap, Marker } from "mapbox-gl";
 import type { PeerDot } from "@/lib/types";
+import PeerCard from "./PeerCard";
 
 const TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "pk.eyJ1IjoicHVsc2UtbWFwIiwiYSI6ImNrMDBkZW1vMDAwMDAwMDAifQ.AAAAAAAAAAAAAAAAAAAAAA";
 
@@ -40,13 +42,16 @@ export default function WorldMap({
   // Spin only while we don't know where the user is (the entry screen).
   const spinRef = useRef(!me);
 
-  // Marker click handlers are bound once, so read the live click handler +
-  // connectability through refs (synced in an effect, never during render).
-  const onPeerClickRef = useRef(onPeerClick);
-  const canConnectRef = useRef(canConnect);
-  useEffect(() => {
-    onPeerClickRef.current = onPeerClick;
-    canConnectRef.current = canConnect;
+  // The dot whose card is open. If that peer goes offline it simply drops out
+  // of `peers`, which closes the card.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = me ? peers.find((p) => p.id === selectedId) : undefined;
+  // Mapbox owns this element's position; React renders the card into it.
+  const [cardEl] = useState(() => {
+    if (typeof document === "undefined") return null;
+    const el = document.createElement("div");
+    el.style.zIndex = "10"; // above the dots
+    return el;
   });
 
   // Initialise the map once.
@@ -85,6 +90,11 @@ export default function WorldMap({
       });
       map.on("load", () => {
         if (!cancelled) setReady(true);
+      });
+      // Tapping empty map closes the card (but not taps on the card itself).
+      map.on("click", (e) => {
+        const target = e.originalEvent.target as Node | null;
+        if (!(target && cardEl?.contains(target))) setSelectedId(null);
       });
 
       // Slow idle spin until the user enters (or grabs the globe).
@@ -187,10 +197,11 @@ export default function WorldMap({
           const el = document.createElement("button");
           el.className = "pulse-dot";
           el.style.color = dotColor(peer.id);
-          el.title = "Tap to connect";
+          el.title = "A stranger";
+          el.setAttribute("aria-label", "A stranger. Open details");
           el.addEventListener("click", (e) => {
             e.stopPropagation();
-            if (canConnectRef.current) onPeerClickRef.current(peer.id);
+            setSelectedId(peer.id);
           });
           marker = new mapboxgl.Marker({ element: el })
             .setLngLat([peer.lng, peer.lat])
@@ -214,8 +225,79 @@ export default function WorldMap({
     };
   }, [peers, ready]);
 
+  // Mark the selected dot.
+  useEffect(() => {
+    for (const [id, marker] of markersRef.current) {
+      marker.getElement().classList.toggle("is-selected", id === selected?.id);
+    }
+  }, [selected?.id, peers]);
+
+  // Anchor the card above the selected dot, and nudge the camera so the dot
+  // sits below centre — the card then always has room above it.
+  const selLng = selected?.lng;
+  const selLat = selected?.lat;
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || !cardEl || selLng === undefined || selLat === undefined)
+      return;
+    let marker: Marker | null = null;
+    let cancelled = false;
+
+    (async () => {
+      const mapboxgl = (await import("mapbox-gl")).default;
+      if (cancelled) return;
+      marker = new mapboxgl.Marker({
+        element: cardEl,
+        anchor: "bottom",
+        offset: [0, -16],
+      })
+        .setLngLat([selLng, selLat])
+        .addTo(map);
+      map.easeTo({ center: [selLng, selLat], offset: [0, 110], duration: 600 });
+    })();
+
+    return () => {
+      cancelled = true;
+      marker?.remove();
+    };
+  }, [ready, cardEl, selLng, selLat]);
+
+  // Keep map gestures (pan, zoom) from starting on the card, and close it
+  // with Esc. `click` must still bubble: React handles it at the app root.
+  useEffect(() => {
+    if (!cardEl) return;
+    const stop = (e: Event) => e.stopPropagation();
+    const events = ["mousedown", "touchstart", "dblclick", "wheel"];
+    for (const ev of events) cardEl.addEventListener(ev, stop);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelectedId(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      for (const ev of events) cardEl.removeEventListener(ev, stop);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [cardEl]);
+
   return (
     <div className="absolute inset-0">
+      {cardEl &&
+        selected &&
+        me &&
+        createPortal(
+          <PeerCard
+            peer={selected}
+            me={me}
+            color={dotColor(selected.id)}
+            canConnect={canConnect}
+            onConnect={() => {
+              setSelectedId(null);
+              onPeerClick(selected.id);
+            }}
+            onClose={() => setSelectedId(null)}
+          />,
+          cardEl,
+        )}
       <div ref={containerRef} className="h-full w-full bg-zinc-900" />
 
       {!TOKEN && (

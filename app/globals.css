@@ -42,6 +42,12 @@ body {
   transform: scale(1.35);
 }
 
+/* The dot whose card is open. */
+.pulse-dot.is-selected {
+  transform: scale(1.5);
+  border-color: #fff;
+}
+
 /* The user's own "you are here" pin — small, sized like the dots. */
 .pulse-me {
   position: relative;
@@ -100,9 +106,27 @@ body {
   animation: rise-in 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
+/* Peer card: pop up out of the dot. */
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-pop-in {
+  animation: pop-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  transform-origin: bottom center;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .pulse-dot,
-  .animate-rise-in {
+  .animate-rise-in,
+  .animate-pop-in {
     animation: none;
   }
 }
