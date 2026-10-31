@@ -8,6 +8,8 @@ export interface ChatMessage {
   id: number;
   mine: boolean;
   text: string;
+  // Event lines in the conversation (e.g. a finished video call's length).
+  system?: boolean;
 }
 
 export type ChatStatus = "connecting" | "connected" | "ended";
@@ -155,8 +157,22 @@ export default function ChatPanel({
           {messages.map((m, i) => {
             const prev = messages[i - 1];
             const next = messages[i + 1];
-            const grouped = prev?.mine === m.mine;
-            const last = next?.mine !== m.mine;
+            if (m.system) {
+              return (
+                <li key={m.id} className="animate-msg-in my-3 flex justify-center">
+                  <span className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-white/55">
+                    <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M2.5 5.5a1.5 1.5 0 0 1 1.5-1.5h5a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5H4a1.5 1.5 0 0 1-1.5-1.5z" />
+                      <path d="M10.5 7l3-2v6l-3-2" />
+                    </svg>
+                    {m.text}
+                  </span>
+                </li>
+              );
+            }
+            // Bubbles from the same sender run together; event lines break a run.
+            const grouped = !!prev && !prev.system && prev.mine === m.mine;
+            const last = !next || !!next.system || next.mine !== m.mine;
             return (
               <li
                 key={m.id}

@@ -9,7 +9,10 @@ export type PeerControl =
   | "mic-on"
   | "mic-off"
   | "cam-on"
-  | "cam-off";
+  | "cam-off"
+  // "Your video reached me" — each side starts the call timer once both
+  // directions are live, so the two durations agree.
+  | "video-live";
 
 interface PeerCallbacks {
   onSignal: (type: DescType, payload: string) => void;

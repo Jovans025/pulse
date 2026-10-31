@@ -96,6 +96,37 @@ export default function Home() {
     setMessages((prev) => [...prev, { id: msgId.current++, mine, text }]);
   }
 
+  // When the call actually started, so its length can be logged in the chat.
+  // That's once video flows both ways: we've received theirs, and they've
+  // told us ("video-live") they received ours. Both sides hit that point
+  // within a data-channel hop, so both show the same duration.
+  const videoStartedAt = useRef<number | null>(null);
+  const gotTheirVideo = useRef(false);
+  const theyGotOurs = useRef(false);
+
+  function maybeStartCallTimer() {
+    if (
+      gotTheirVideo.current &&
+      theyGotOurs.current &&
+      videoStartedAt.current === null
+    ) {
+      videoStartedAt.current = Date.now();
+    }
+  }
+
+  function logCallDuration() {
+    const started = videoStartedAt.current;
+    videoStartedAt.current = null;
+    gotTheirVideo.current = false;
+    theyGotOurs.current = false;
+    if (started === null) return;
+    const text = `Video call · ${formatDuration(Date.now() - started)}`;
+    setMessages((prev) => [
+      ...prev,
+      { id: msgId.current++, mine: false, text, system: true },
+    ]);
+  }
+
   function teardown(message?: string, keepChat = false) {
     if (requestTimer.current) clearTimeout(requestTimer.current);
     if (typingTimer.current) clearTimeout(typingTimer.current);
@@ -123,6 +154,7 @@ export default function Home() {
   // The other side ended things. Mid-chat, keep the conversation on screen with
   // a closing note instead of snapping straight back to the map.
   function peerLeft(peerId: string, reason: string) {
+    logCallDuration();
     const wasChatting = connRef.current.kind === "connected";
     teardown(wasChatting ? undefined : reason, wasChatting);
     if (wasChatting) setChatEnded({ peerId, reason });
@@ -143,6 +175,9 @@ export default function Home() {
   function startPeer(peerId: string, initiator: boolean) {
     setChatEnded(null);
     setMessages([]);
+    videoStartedAt.current = null;
+    gotTheirVideo.current = false;
+    theyGotOurs.current = false;
     const ps = new PeerSession(initiator, {
       onSignal: (type: DescType, payload: string) => {
         void sendSignal(sessionId, peerId, type, payload);
@@ -160,7 +195,14 @@ export default function Home() {
         typingTimer.current = setTimeout(() => setPeerTyping(false), TYPING_SHOW_MS);
       },
       onControl: (ctrl) => handleControl(ctrl),
-      onRemoteStream: (stream) => setRemoteStream(stream),
+      onRemoteStream: (stream) => {
+        if (stream && !gotTheirVideo.current) {
+          gotTheirVideo.current = true;
+          ps.sendControl("video-live");
+          maybeStartCallTimer();
+        }
+        setRemoteStream(stream);
+      },
       onConnectionState: (state) => {
         if (state === "failed") {
           peerLost(peerId, "The connection dropped.");
@@ -215,6 +257,7 @@ export default function Home() {
         }
         break;
       case "video-end":
+        logCallDuration();
         ps?.stopVideo();
         setLocalStream(null);
         setRemoteStream(null);
@@ -228,6 +271,10 @@ export default function Home() {
       case "cam-on":
       case "cam-off":
         setRemoteCamOn(ctrl === "cam-on");
+        break;
+      case "video-live":
+        theyGotOurs.current = true;
+        maybeStartCallTimer();
         break;
     }
   }
@@ -306,6 +353,7 @@ export default function Home() {
   }
 
   function endVideo() {
+    logCallDuration();
     const ps = peerRef.current;
     ps?.stopVideo();
     ps?.sendControl("video-end");
@@ -577,6 +625,15 @@ export default function Home() {
       )}
     </main>
   );
+}
+
+// 3:07, or 1:02:45 past an hour.
+function formatDuration(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = String(total % 60).padStart(2, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
 }
 
 // Rough distance + local time, as on the peer card.
