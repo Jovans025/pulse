@@ -30,6 +30,9 @@ export default function ChatPanel({
   onStartVideo,
   onEnd,
   onClose,
+  overlay = false,
+  hidden = false,
+  onHide,
 }: {
   messages: ChatMessage[];
   status: ChatStatus;
@@ -44,6 +47,11 @@ export default function ChatPanel({
   onStartVideo: () => void;
   onEnd: () => void;
   onClose: () => void;
+  // During video the chat floats over the call as a drawer; `hidden` keeps it
+  // mounted (and your draft intact) while tucked away.
+  overlay?: boolean;
+  hidden?: boolean;
+  onHide?: () => void;
 }) {
   const [draft, setDraft] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
@@ -79,7 +87,7 @@ export default function ChatPanel({
   return (
     <section
       aria-label="Chat with a stranger"
-      className="animate-rise-in absolute inset-x-0 bottom-0 z-20 flex h-[88dvh] flex-col overflow-hidden rounded-t-3xl border border-white/10 bg-[#0b0f1d]/85 text-white shadow-[0_30px_80px_-20px_rgba(0,0,0,0.9)] backdrop-blur-xl sm:inset-x-auto sm:bottom-4 sm:right-4 sm:top-4 sm:h-auto sm:w-[380px] sm:rounded-3xl"
+      className={`animate-rise-in absolute inset-x-0 bottom-0 ${overlay ? "z-40" : "z-20"} ${hidden ? "hidden" : "flex"} h-[88dvh] flex-col overflow-hidden rounded-t-3xl border border-white/10 bg-[#0b0f1d]/85 text-white shadow-[0_30px_80px_-20px_rgba(0,0,0,0.9)] backdrop-blur-xl sm:inset-x-auto sm:bottom-4 sm:right-4 sm:top-4 sm:h-auto sm:w-[380px] sm:rounded-3xl`}
     >
       {/* Header */}
       <header className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
@@ -98,6 +106,11 @@ export default function ChatPanel({
           </IconButton>
         ) : (
           <>
+            {onHide && (
+              <IconButton label="Hide chat" onClick={onHide}>
+                <path d="M4 6l4 4 4-4" />
+              </IconButton>
+            )}
             <IconButton
               label="Start video"
               onClick={onStartVideo}

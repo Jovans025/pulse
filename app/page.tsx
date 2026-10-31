@@ -3,12 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import EntryGate from "./components/EntryGate";
 import WorldMap from "./components/WorldMap";
-import ConnectionPrompt from "./components/ConnectionPrompt";
 import ChatPanel, { type ChatMessage } from "./components/ChatPanel";
 import VideoPanel from "./components/VideoPanel";
 import RequestingBar from "./components/RequestingBar";
-import IncomingRequest from "./components/IncomingRequest";
+import InviteCard from "./components/InviteCard";
 import { dotColor } from "@/lib/colors";
+import { describeLocalTime, distanceKm, formatDistance } from "@/lib/geo";
 import { playChime } from "@/lib/chime";
 import { join, leave, poll, sendSignal } from "@/lib/api";
 import { PeerSession, type DescType, type PeerControl } from "@/lib/webrtc";
@@ -59,6 +59,21 @@ export default function Home() {
     _setVideo(v);
   };
 
+  // In-call state: our mic/camera, what the other side told us about theirs,
+  // and the chat drawer (with an unread count while it's tucked away).
+  const [micOn, setMicOn] = useState(true);
+  const [camOn, setCamOn] = useState(true);
+  const [remoteMicOn, setRemoteMicOn] = useState(true);
+  const [remoteCamOn, setRemoteCamOn] = useState(true);
+  const [chatOpen, _setChatOpen] = useState(false);
+  const chatOpenRef = useRef(false);
+  const setChatOpen = (open: boolean) => {
+    chatOpenRef.current = open;
+    _setChatOpen(open);
+    if (open) setUnread(0);
+  };
+  const [unread, setUnread] = useState(0);
+
   const peerRef = useRef<PeerSession | null>(null);
   const msgId = useRef(0);
   const [peerTyping, setPeerTyping] = useState(false);
@@ -89,10 +104,20 @@ export default function Home() {
     setLocalStream(null);
     setRemoteStream(null);
     setVideo("none");
+    resetCall();
     setPeerTyping(false);
     if (!keepChat) setMessages([]);
     setConn({ kind: "idle" });
     if (message) showNotice(message);
+  }
+
+  // Fresh in-call state for each video session.
+  function resetCall() {
+    setMicOn(true);
+    setCamOn(true);
+    setRemoteMicOn(true);
+    setRemoteCamOn(true);
+    setChatOpen(false);
   }
 
   // The other side ended things. Mid-chat, keep the conversation on screen with
@@ -125,6 +150,9 @@ export default function Home() {
       onChat: (text) => {
         setPeerTyping(false);
         addMessage(false, text);
+        if (videoRef.current === "active" && !chatOpenRef.current) {
+          setUnread((n) => n + 1);
+        }
       },
       onTyping: () => {
         setPeerTyping(true);
@@ -169,6 +197,7 @@ export default function Home() {
         if (videoRef.current === "requesting" && ps) {
           ps.startVideo()
             .then((stream) => {
+              resetCall();
               setLocalStream(stream);
               setVideo("active");
             })
@@ -190,6 +219,15 @@ export default function Home() {
         setLocalStream(null);
         setRemoteStream(null);
         setVideo("none");
+        resetCall();
+        break;
+      case "mic-on":
+      case "mic-off":
+        setRemoteMicOn(ctrl === "mic-on");
+        break;
+      case "cam-on":
+      case "cam-off":
+        setRemoteCamOn(ctrl === "cam-on");
         break;
     }
   }
@@ -250,6 +288,7 @@ export default function Home() {
     if (!ps) return;
     ps.startVideo()
       .then((stream) => {
+        resetCall();
         setLocalStream(stream);
         ps.sendControl("video-accept");
         setVideo("active");
@@ -273,6 +312,28 @@ export default function Home() {
     setLocalStream(null);
     setRemoteStream(null);
     setVideo("none");
+    resetCall();
+  }
+
+  // Video requests don't expire, so let the asker back out.
+  function cancelVideoRequest() {
+    if (videoRef.current !== "requesting") return;
+    peerRef.current?.sendControl("video-end");
+    setVideo("none");
+  }
+
+  function toggleMic() {
+    const on = !micOn;
+    setMicOn(on);
+    peerRef.current?.setMicEnabled(on);
+    peerRef.current?.sendControl(on ? "mic-on" : "mic-off");
+  }
+
+  function toggleCam() {
+    const on = !camOn;
+    setCamOn(on);
+    peerRef.current?.setCameraEnabled(on);
+    peerRef.current?.sendControl(on ? "cam-on" : "cam-off");
   }
 
   function processSignal(sig: SignalMsg) {
@@ -426,6 +487,8 @@ export default function Home() {
 
       {conn.kind === "requesting" && (
         <RequestingBar
+          title="Reaching out…"
+          subtitle="Waiting for them to say hello back"
           durationMs={REQUEST_TIMEOUT_MS}
           color={dotColor(conn.peerId)}
           onCancel={cancelRequest}
@@ -433,11 +496,13 @@ export default function Home() {
       )}
 
       {conn.kind === "incoming" && (
-        <IncomingRequest
-          peer={peers.find((p) => p.id === conn.peerId)}
-          me={myLocation}
+        <InviteCard
+          title="A stranger wants to talk"
+          details={<PeerDetails peer={peers.find((p) => p.id === conn.peerId)} me={myLocation} />}
           color={dotColor(conn.peerId)}
           durationMs={REQUEST_TIMEOUT_MS}
+          declineLabel="Not now"
+          acceptLabel="Say hello"
           onAccept={acceptIncoming}
           onDecline={declineIncoming}
         />
@@ -466,33 +531,68 @@ export default function Home() {
           onStartVideo={startVideoRequest}
           onEnd={endConnection}
           onClose={dismissEndedChat}
+          overlay={video === "active"}
+          hidden={video === "active" && !chatOpen}
+          onHide={video === "active" ? () => setChatOpen(false) : undefined}
         />
       )}
 
-      {video === "requesting" && (
-        <div className="absolute bottom-24 left-1/2 z-30 -translate-x-1/2 rounded-full bg-zinc-800/90 px-4 py-2 text-sm text-zinc-100 shadow-lg backdrop-blur">
-          Waiting for stranger to accept video…
-        </div>
+      {video === "requesting" && chatPeerId && (
+        <RequestingBar
+          title="Asking to turn on video…"
+          subtitle="Your camera starts once they agree"
+          color={dotColor(chatPeerId)}
+          onCancel={cancelVideoRequest}
+        />
       )}
 
-      {video === "incoming" && (
-        <ConnectionPrompt
-          title="Start video call?"
-          subtitle="The stranger wants to turn on video."
-          acceptLabel="Accept"
-          declineLabel="Decline"
+      {video === "incoming" && chatPeerId && (
+        <InviteCard
+          title="Turn on video?"
+          details="The stranger wants to see you. Your camera and mic will turn on."
+          color={dotColor(chatPeerId)}
+          declineLabel="Keep texting"
+          acceptLabel="Turn on camera"
           onAccept={acceptVideo}
           onDecline={declineVideo}
         />
       )}
 
-      {video === "active" && (
+      {video === "active" && chatPeerId && (
         <VideoPanel
           localStream={localStream}
           remoteStream={remoteStream}
+          color={dotColor(chatPeerId)}
+          micOn={micOn}
+          camOn={camOn}
+          remoteMicOn={remoteMicOn}
+          remoteCamOn={remoteCamOn}
+          chatOpen={chatOpen}
+          unread={unread}
+          onToggleMic={toggleMic}
+          onToggleCam={toggleCam}
+          onToggleChat={() => setChatOpen(!chatOpen)}
           onEnd={endVideo}
         />
       )}
     </main>
+  );
+}
+
+// Rough distance + local time, as on the peer card.
+function PeerDetails({
+  peer,
+  me,
+}: {
+  peer: PeerDot | undefined;
+  me: { lat: number; lng: number } | null;
+}) {
+  if (!peer || !me) return <>Somewhere out there</>;
+  return (
+    <>
+      {formatDistance(distanceKm(me, peer))}
+      <br />
+      {describeLocalTime(peer.lng)}
+    </>
   );
 }

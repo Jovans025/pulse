@@ -3,7 +3,13 @@ export type PeerControl =
   | "video-request"
   | "video-accept"
   | "video-decline"
-  | "video-end";
+  | "video-end"
+  // Tell the other side when we mute / turn the camera off, so they can show
+  // it (a disabled track just goes silent / black on their end).
+  | "mic-on"
+  | "mic-off"
+  | "cam-on"
+  | "cam-off";
 
 interface PeerCallbacks {
   onSignal: (type: DescType, payload: string) => void;
@@ -167,6 +173,16 @@ export class PeerSession {
       }
     }
     return this.localStream;
+  }
+
+  // Enable/disable without renegotiating: instant, and the sender keeps its
+  // slot so turning it back on needs no new offer.
+  setMicEnabled(on: boolean) {
+    for (const t of this.localStream?.getAudioTracks() ?? []) t.enabled = on;
+  }
+
+  setCameraEnabled(on: boolean) {
+    for (const t of this.localStream?.getVideoTracks() ?? []) t.enabled = on;
   }
 
   stopVideo() {
