@@ -84,19 +84,12 @@ asking what was missing:
    the victim's browser connected to the attacker instead of the stranger.
    The server also never checked that two users had agreed to connect
    before relaying `accept` / `offer` / `ice` / `end`.
-3. 🟠 **Locating someone's real position:** each join picked a fresh random
-   1–3 km offset. Forcing a victim to rejoin repeatedly (via #1) and
-   averaging the positions converges on where they really are.
-4. 🟠 **No rate limiting:** fake-dot flooding, request harassment, and
-   unbounded signal-table growth.
-5. 🟡 **Weak input validation:** no format check on IDs, payloads accepted on
-   every message type, no cap on queued messages per user.
-6. 🟡 **`busy` race:** a `decline` freed *both* users, including one who was
+3. 🟡 **Weak input validation:** no format check on IDs, and payloads
+   accepted on every message type.
+4. 🟡 **`busy` race:** a `decline` freed *both* users, including one who was
    mid-call with someone else.
-7. 🟡 **No security headers:** the site could be framed (clickjacking the
-   Accept / camera prompts), and there was no Permissions-Policy.
 
-**Fixed (the two critical issues, plus #6 and part of #5):**
+**Fixed (all four):**
 - **Secret session tokens:** each tab holds a random 256-bit token. The server
   derives the public ID as `sha256(token)` and never trusts an ID from the
   client. The IDs other people see can't be turned back into the token.
@@ -108,7 +101,9 @@ asking what was missing:
   and `end` your own call. Every check is one conditional `updateMany`
   (atomic per row), so it holds under concurrency without interactive
   transactions over the Neon pooler. `decline` no longer touches `busy`.
-  `leave` works out who to notify from the database. Verified with a
+  `leave` works out who to notify from the database. IDs must be
+  well-formed, and only `offer` / `answer` / `ice` may carry a payload.
+  Verified with a
   logged-in third session: forged accept / offer / decline get **403**, and
   ending someone else's call does nothing.
 
