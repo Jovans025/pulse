@@ -83,14 +83,28 @@ export default function Home() {
       onRemoteStream: (stream) => setRemoteStream(stream),
       onConnectionState: (state) => {
         if (state === "failed") {
-          teardown("Connection failed (network).");
+          peerLost(peerId, "Connection failed (network).");
         }
       },
       onChannelOpen: () => {
         setConn({ kind: "connected", peerId });
       },
+      onChannelClose: () => peerLost(peerId, "Stranger disconnected."),
     });
     peerRef.current = ps;
+  }
+
+  // The peer vanished without us receiving an `end` (tab closed, crash, network
+  // drop). Send `end` ourselves so the server clears both busy flags.
+  function peerLost(peerId: string, message: string) {
+    const c = connRef.current;
+    if (
+      (c.kind === "connecting" || c.kind === "connected") &&
+      c.peerId === peerId
+    ) {
+      void sendSignal(sessionId, peerId, "end");
+      teardown(message);
+    }
   }
 
   function handleControl(ctrl: PeerControl) {
@@ -251,13 +265,9 @@ export default function Home() {
       }
       case "end": {
         const c = connRef.current;
-        if (
-          (c.kind === "incoming" ||
-            c.kind === "connecting" ||
-            c.kind === "connected") &&
-          c.peerId === sig.fromId
-        ) {
+        if (c.kind !== "idle" && c.peerId === sig.fromId) {
           if (c.kind === "incoming") setConn({ kind: "idle" });
+          else if (c.kind === "requesting") teardown("Stranger left.");
           else teardown("Stranger disconnected.");
         }
         break;
@@ -294,7 +304,10 @@ export default function Home() {
 
   useEffect(() => {
     if (!sessionId || phase !== "live") return;
-    const onLeave = () => leave(sessionId);
+    const onLeave = () => {
+      const c = connRef.current;
+      leave(sessionId, c.kind === "idle" ? undefined : c.peerId);
+    };
     window.addEventListener("pagehide", onLeave);
     window.addEventListener("beforeunload", onLeave);
     return () => {

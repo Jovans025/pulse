@@ -12,6 +12,7 @@ interface PeerCallbacks {
   onRemoteStream: (stream: MediaStream | null) => void;
   onConnectionState: (state: RTCPeerConnectionState) => void;
   onChannelOpen: () => void;
+  onChannelClose: () => void;
 }
 
 const ICE_CONFIG: RTCConfiguration = {
@@ -73,6 +74,10 @@ export class PeerSession {
 
   private wireDataChannel(dc: RTCDataChannel) {
     dc.onopen = () => this.cb.onChannelOpen();
+    // Fires promptly when the remote tab closes; ignore our own close().
+    dc.onclose = () => {
+      if (!this.closed) this.cb.onChannelClose();
+    };
     dc.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data as string);
