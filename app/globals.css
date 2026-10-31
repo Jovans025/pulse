@@ -42,6 +42,14 @@ body {
   transform: scale(1.35);
 }
 
+/* In a conversation: dimmed and still. Uses filter, since Mapbox owns the
+   marker's opacity on the globe. */
+.pulse-dot.is-busy {
+  animation: none;
+  filter: saturate(0.35) brightness(0.55);
+  box-shadow: none;
+}
+
 /* The dot whose card is open. */
 .pulse-dot.is-selected {
   transform: scale(1.5);

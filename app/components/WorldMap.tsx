@@ -205,7 +205,9 @@ export default function WorldMap({
             .addTo(map);
           markers.set(peer.id, marker);
         }
-        marker.getElement().style.opacity = peer.busy ? "0.35" : "1";
+        // A class, not inline opacity: on the globe Mapbox drives each
+        // marker's opacity itself (fading dots round the far side).
+        marker.getElement().classList.toggle("is-busy", peer.busy);
       }
 
       // Drop markers for peers that went offline / got filtered out.
