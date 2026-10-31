@@ -73,9 +73,13 @@ export function formatDistance(km: number): string {
 
 // Solar time from longitude — no timezone lookup, so it's approximate (hence
 // the "~"), but it never needs more than the dot's position.
-export function describeLocalTime(lng: number, now = new Date()): string {
+export function localSolarHour(lng: number, now = new Date()): number {
   const utcHours = now.getUTCHours() + now.getUTCMinutes() / 60;
-  const hour = Math.round((((utcHours + lng / 15) % 24) + 24) % 24) % 24;
+  return (((utcHours + lng / 15) % 24) + 24) % 24;
+}
+
+export function describeLocalTime(lng: number, now = new Date()): string {
+  const hour = Math.round(localSolarHour(lng, now)) % 24;
   const label = `${hour % 12 === 0 ? 12 : hour % 12} ${hour < 12 ? "AM" : "PM"}`;
   const part =
     hour >= 5 && hour < 12

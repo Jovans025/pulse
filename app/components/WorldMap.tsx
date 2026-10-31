@@ -3,16 +3,32 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import "mapbox-gl/dist/mapbox-gl.css";
-import type { GeoJSONSource, Map as MapboxMap, Marker } from "mapbox-gl";
+import type {
+  GeoJSONSource,
+  ImageSource,
+  Map as MapboxMap,
+  Marker,
+} from "mapbox-gl";
 import type { PeerDot } from "@/lib/types";
 import { dotColor } from "@/lib/colors";
 import { greatCircle } from "@/lib/geo";
+import {
+  MERC_MAX_LAT,
+  renderSunlightImage,
+  subsolarPoint,
+  sunElevation,
+} from "@/lib/sun";
 import PeerCard from "./PeerCard";
 
 const TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "pk.eyJ1IjoicHVsc2UtbWFwIiwiYSI6ImNrMDBkZW1vMDAwMDAwMDAifQ.AAAAAAAAAAAAAAAAAAAAAA";
 
 // Idle spin speed for the pre-entry globe.
 const DEG_PER_SEC = 4;
+
+// The night side is redrawn this often, so the terminator visibly creeps
+// west over a session (the Earth turns 0.25° a minute).
+const NIGHT_REFRESH_MS = 60_000;
+const NIGHT_IMAGE_SIZE = 512;
 
 export default function WorldMap({
   peers,
@@ -84,6 +100,7 @@ export default function WorldMap({
         });
       });
       map.on("load", () => {
+        addNightLayer(map);
         addLinkLayers(map);
         if (!cancelled) setReady(true);
       });
@@ -184,6 +201,7 @@ export default function WorldMap({
       if (cancelled) return;
       const markers = markersRef.current;
       const seen = new Set<string>();
+      const sun = subsolarPoint(new Date());
 
       for (const peer of peers) {
         seen.add(peer.id);
@@ -206,6 +224,10 @@ export default function WorldMap({
         // A class, not inline opacity: on the globe Mapbox drives each
         // marker's opacity itself (fading dots round the far side).
         marker.getElement().classList.toggle("is-busy", peer.busy);
+        // Lights on the dark side burn brighter.
+        marker
+          .getElement()
+          .classList.toggle("is-night", sunElevation(peer.lat, peer.lng, sun) < -6);
       }
 
       // Drop markers for peers that went offline / got filtered out.
@@ -221,6 +243,17 @@ export default function WorldMap({
       cancelled = true;
     };
   }, [peers, ready]);
+
+  // Keep the day/night line moving.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const timer = window.setInterval(() => {
+      const source = map.getSource("night") as ImageSource | undefined;
+      source?.updateImage({ url: nightImageUrl() });
+    }, NIGHT_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [ready]);
 
   // Mark the selected dot.
   useEffect(() => {
@@ -418,6 +451,42 @@ const EMPTY_LINE: GeoJSON.FeatureCollection = {
   type: "FeatureCollection",
   features: [],
 };
+
+// Real-time night side, draped over the globe as a Web Mercator image.
+function nightImageUrl(): string {
+  const canvas = document.createElement("canvas");
+  canvas.width = NIGHT_IMAGE_SIZE;
+  canvas.height = NIGHT_IMAGE_SIZE;
+  canvas
+    .getContext("2d")!
+    .putImageData(renderSunlightImage(NIGHT_IMAGE_SIZE, NIGHT_IMAGE_SIZE, new Date()), 0, 0);
+  return canvas.toDataURL();
+}
+
+function addNightLayer(map: MapboxMap) {
+  if (map.getSource("night")) return;
+  map.addSource("night", {
+    type: "image",
+    url: nightImageUrl(),
+    coordinates: [
+      [-180, MERC_MAX_LAT],
+      [180, MERC_MAX_LAT],
+      [180, -MERC_MAX_LAT],
+      [-180, -MERC_MAX_LAT],
+    ],
+  });
+  // Under the labels, so place names stay legible at night.
+  const firstSymbol = map.getStyle().layers?.find((l) => l.type === "symbol")?.id;
+  map.addLayer(
+    {
+      id: "night",
+      type: "raster",
+      source: "night",
+      paint: { "raster-opacity": 1, "raster-fade-duration": 0, "raster-resampling": "linear" },
+    },
+    firstSymbol,
+  );
+}
 
 // Glow + core line for the you ↔ stranger arc; data is set per connection.
 function addLinkLayers(map: MapboxMap) {

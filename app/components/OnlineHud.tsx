@@ -2,12 +2,15 @@
 
 import { useState } from "react";
 import type { PeerDot } from "@/lib/types";
+import { localSolarHour } from "@/lib/geo";
 
 // Bottom-left status: who's around, or — when you're the only light on — a
 // nudge to invite someone, so an empty globe never feels like a broken one.
 export default function OnlineHud({ peers }: { peers: PeerDot[] }) {
   const [copied, setCopied] = useState(false);
   const chatting = peers.filter((p) => p.busy).length;
+  // Strangers where it's between midnight and 5 AM.
+  const nightOwls = peers.filter((p) => localSolarHour(p.lng) < 5).length;
 
   async function invite() {
     const url = window.location.origin;
@@ -59,6 +62,11 @@ export default function OnlineHud({ peers }: { peers: PeerDot[] }) {
         <span className="font-semibold text-white">{peers.length}</span>{" "}
         {peers.length === 1 ? "stranger" : "strangers"} online
         {chatting > 0 && <span className="text-white/45"> · {chatting} talking</span>}
+        {nightOwls > 0 && (
+          <span className="text-white/45">
+            {" "}· {nightOwls} {nightOwls === 1 ? "night owl" : "night owls"} 🌙
+          </span>
+        )}
       </span>
     </div>
   );
