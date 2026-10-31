@@ -6,6 +6,10 @@ import WorldMap from "./components/WorldMap";
 import ConnectionPrompt from "./components/ConnectionPrompt";
 import ChatPanel, { type ChatMessage } from "./components/ChatPanel";
 import VideoPanel from "./components/VideoPanel";
+import RequestingBar from "./components/RequestingBar";
+import IncomingRequest from "./components/IncomingRequest";
+import { dotColor } from "@/lib/colors";
+import { playChime } from "@/lib/chime";
 import { join, leave, poll, sendSignal } from "@/lib/api";
 import { PeerSession, type DescType, type PeerControl } from "@/lib/webrtc";
 import { POLL_INTERVAL_MS } from "@/lib/presence";
@@ -232,6 +236,7 @@ export default function Home() {
       case "request": {
         if (connRef.current.kind === "idle") {
           setConn({ kind: "incoming", peerId: sig.fromId });
+          playChime();
         } else {
           void sendSignal(sessionId, sig.fromId, "decline");
         }
@@ -339,6 +344,7 @@ export default function Home() {
   }
 
   const inChat = conn.kind === "connecting" || conn.kind === "connected";
+  const connPeerId = conn.kind === "idle" ? null : conn.peerId;
 
   return (
     <main className="fixed inset-0 overflow-hidden">
@@ -348,6 +354,15 @@ export default function Home() {
         onPeerClick={requestConnection}
         canConnect={phase === "live" && conn.kind === "idle"}
         showHud={phase === "live"}
+        link={
+          connPeerId
+            ? {
+                peerId: connPeerId,
+                pending: conn.kind === "requesting" || conn.kind === "incoming",
+                incoming: conn.kind === "incoming",
+              }
+            : null
+        }
       />
 
       {phase === "gate" && (
@@ -355,28 +370,28 @@ export default function Home() {
       )}
 
       {notice && (
-        <div className="absolute left-1/2 top-20 z-30 -translate-x-1/2 rounded-full bg-zinc-800/90 px-4 py-2 text-sm text-zinc-100 shadow-lg backdrop-blur">
+        <div
+          role="status"
+          className="animate-pop-in absolute left-1/2 top-5 z-40 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/10 bg-[#0b0f1d]/85 px-4 py-2 text-sm text-white/85 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.9)] backdrop-blur-xl"
+        >
           {notice}
         </div>
       )}
 
       {conn.kind === "requesting" && (
-        <div className="absolute left-1/2 top-20 z-30 flex -translate-x-1/2 items-center gap-3 rounded-full bg-zinc-800/90 px-4 py-2 text-sm text-zinc-100 shadow-lg backdrop-blur">
-          <span>Requesting connection…</span>
-          <button
-            onClick={cancelRequest}
-            className="rounded-full bg-zinc-700 px-3 py-1 text-xs hover:bg-zinc-600"
-          >
-            Cancel
-          </button>
-        </div>
+        <RequestingBar
+          durationMs={REQUEST_TIMEOUT_MS}
+          color={dotColor(conn.peerId)}
+          onCancel={cancelRequest}
+        />
       )}
 
       {conn.kind === "incoming" && (
-        <ConnectionPrompt
-          title="A stranger wants to connect"
-          acceptLabel="Accept"
-          declineLabel="Decline"
+        <IncomingRequest
+          peer={peers.find((p) => p.id === conn.peerId)}
+          me={myLocation}
+          color={dotColor(conn.peerId)}
+          durationMs={REQUEST_TIMEOUT_MS}
           onAccept={acceptIncoming}
           onDecline={declineIncoming}
         />

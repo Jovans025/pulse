@@ -88,3 +88,43 @@ export function describeLocalTime(lng: number, now = new Date()): string {
   // Non-breaking spaces keep "~10 AM" on one line.
   return `${part} there · ~${label.replace(" ", "\u00a0")}`;
 }
+
+// Points along the great circle from a to b, as [lng, lat] pairs for a
+// GeoJSON line. Longitudes are unwrapped (may exceed ±180) so the line takes
+// the short way across the antimeridian instead of wrapping round the globe.
+export function greatCircle(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+  segments = 96,
+): [number, number][] {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const toDeg = (r: number) => (r * 180) / Math.PI;
+  const toVec = (p: { lat: number; lng: number }) => {
+    const lat = toRad(p.lat);
+    const lng = toRad(p.lng);
+    return [Math.cos(lat) * Math.cos(lng), Math.cos(lat) * Math.sin(lng), Math.sin(lat)];
+  };
+  const va = toVec(a);
+  const vb = toVec(b);
+  const dot = Math.min(1, Math.max(-1, va[0] * vb[0] + va[1] * vb[1] + va[2] * vb[2]));
+  const omega = Math.acos(dot);
+  if (omega < 1e-9) return [[a.lng, a.lat], [b.lng, b.lat]];
+
+  const points: [number, number][] = [];
+  let prevLng = a.lng;
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const ka = Math.sin((1 - t) * omega) / Math.sin(omega);
+    const kb = Math.sin(t * omega) / Math.sin(omega);
+    const x = ka * va[0] + kb * vb[0];
+    const y = ka * va[1] + kb * vb[1];
+    const z = ka * va[2] + kb * vb[2];
+    let lng = toDeg(Math.atan2(y, x));
+    const lat = toDeg(Math.atan2(z, Math.hypot(x, y)));
+    while (lng - prevLng > 180) lng -= 360;
+    while (lng - prevLng < -180) lng += 360;
+    prevLng = lng;
+    points.push([lng, lat]);
+  }
+  return points;
+}

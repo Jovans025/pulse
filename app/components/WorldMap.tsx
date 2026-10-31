@@ -3,20 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import "mapbox-gl/dist/mapbox-gl.css";
-import type { Map as MapboxMap, Marker } from "mapbox-gl";
+import type { GeoJSONSource, Map as MapboxMap, Marker } from "mapbox-gl";
 import type { PeerDot } from "@/lib/types";
+import { dotColor } from "@/lib/colors";
+import { greatCircle } from "@/lib/geo";
 import PeerCard from "./PeerCard";
 
 const TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "pk.eyJ1IjoicHVsc2UtbWFwIiwiYSI6ImNrMDBkZW1vMDAwMDAwMDAifQ.AAAAAAAAAAAAAAAAAAAAAA";
-
-// Warm "city light" hues (coral → amber → gold), stable per user.
-function dotColor(id: string): string {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) {
-    hash = (hash * 31 + id.charCodeAt(i)) | 0;
-  }
-  return `hsl(${12 + (Math.abs(hash) % 40)}, 95%, 66%)`;
-}
 
 // Idle spin speed for the pre-entry globe.
 const DEG_PER_SEC = 4;
@@ -27,12 +20,16 @@ export default function WorldMap({
   onPeerClick,
   canConnect,
   showHud = true,
+  link = null,
 }: {
   peers: PeerDot[];
   me: { lat: number; lng: number } | null;
   onPeerClick: (id: string) => void;
   canConnect: boolean;
   showHud?: boolean;
+  // The stranger you're connecting with, if any. `pending` = not yet
+  // accepted; `incoming` = they reached out, so the arc draws from them.
+  link?: { peerId: string; pending: boolean; incoming: boolean } | null;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapboxMap | null>(null);
@@ -89,6 +86,7 @@ export default function WorldMap({
         });
       });
       map.on("load", () => {
+        addLinkLayers(map);
         if (!cancelled) setReady(true);
       });
       // Tapping empty map closes the card (but not taps on the card itself).
@@ -163,9 +161,8 @@ export default function WorldMap({
         const el = document.createElement("div");
         el.className = "pulse-me";
         el.title = "You are here";
-        el.innerHTML = `<span class="pulse-me-label">Me</span>📍`;
-        // anchor "bottom" → the pin's tip sits on the exact coordinate.
-        meMarkerRef.current = new mapboxgl.Marker({ element: el, anchor: "bottom" })
+        el.innerHTML = `<span class="pulse-me-label">You</span><span class="pulse-me-ring"></span><span class="pulse-me-core"></span>`;
+        meMarkerRef.current = new mapboxgl.Marker({ element: el })
           .setLngLat([me.lng, me.lat])
           .addTo(map);
       } else {
@@ -262,6 +259,106 @@ export default function WorldMap({
     };
   }, [ready, cardEl, selLng, selLat]);
 
+  // The arc between you and the stranger you're connecting with. While the
+  // request is pending it keeps drawing itself out towards them; once they
+  // accept it stays lit.
+  const linkPeer = link && me ? peers.find((p) => p.id === link.peerId) : undefined;
+  const linkLng = linkPeer?.lng;
+  const linkLat = linkPeer?.lat;
+  const linkPending = link?.pending ?? false;
+  const linkIncoming = link?.incoming ?? false;
+  const meLng = me?.lng;
+  const meLat = me?.lat;
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const source = map.getSource("link") as GeoJSONSource | undefined;
+    if (!source) return;
+    if (
+      meLng === undefined ||
+      meLat === undefined ||
+      linkLng === undefined ||
+      linkLat === undefined
+    ) {
+      source.setData(EMPTY_LINE);
+      return;
+    }
+
+    const mine = { lat: meLat, lng: meLng };
+    const theirs = { lat: linkLat, lng: linkLng };
+    // Draw from whoever reached out; keep white at your end, amber at theirs.
+    const coords = linkIncoming ? greatCircle(theirs, mine) : greatCircle(mine, theirs);
+    const [startColor, endColor] = linkIncoming
+      ? [THEIR_COLOR, MY_COLOR]
+      : [MY_COLOR, THEIR_COLOR];
+    map.setPaintProperty("link-line", "line-gradient", [
+      "interpolate",
+      ["linear"],
+      ["line-progress"],
+      0,
+      startColor,
+      1,
+      endColor,
+    ]);
+    // Reveal the first `revealed` (0–1) of the arc. Done by feeding a growing
+    // slice of the line rather than line-trim-offset, which didn't render.
+    const setTrim = (revealed: number) => {
+      const n = Math.max(2, Math.ceil(revealed * coords.length));
+      source.setData({
+        type: "Feature",
+        properties: {},
+        geometry: { type: "LineString", coordinates: coords.slice(0, n) },
+      });
+    };
+    const reducedMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    if (!linkPending || reducedMotion) {
+      setTrim(1);
+      map.setPaintProperty("link-glow", "line-opacity", linkPending ? 0.25 : 0.5);
+      return;
+    }
+
+    // Pending: draw out over ~1.3s, hold, repeat; the glow breathes.
+    let raf = 0;
+    const t0 = performance.now();
+    const frame = (now: number) => {
+      const t = ((now - t0) % 2000) / 2000;
+      const p = Math.min(1, t / 0.65);
+      setTrim(1 - (1 - p) ** 3); // ease-out
+      map.setPaintProperty(
+        "link-glow",
+        "line-opacity",
+        0.2 + 0.15 * Math.sin(((now - t0) / 1000) * Math.PI),
+      );
+      raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, [ready, meLng, meLat, linkLng, linkLat, linkPending, linkIncoming]);
+
+  // Frame both ends of a new link so you can see the arc you just started.
+  const linkPeerId = linkPeer?.id;
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || !linkPeerId) return;
+    if (meLng === undefined || meLat === undefined) return;
+    if (linkLng === undefined || linkLat === undefined) return;
+    const coords = greatCircle({ lat: meLat, lng: meLng }, { lat: linkLat, lng: linkLng });
+    const lngs = coords.map((c) => c[0]);
+    const lats = coords.map((c) => c[1]);
+    map.fitBounds(
+      [
+        [Math.min(...lngs), Math.min(...lats)],
+        [Math.max(...lngs), Math.max(...lats)],
+      ],
+      // Extra room top and bottom for the request bar / incoming card.
+      { padding: { top: 140, bottom: 280, left: 100, right: 100 }, maxZoom: 6, duration: 1200 },
+    );
+    // Only when a new link starts, not every time a dot shifts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, linkPeerId]);
+
   // Keep map gestures (pan, zoom) from starting on the card, and close it
   // with Esc. `click` must still bubble: React handles it at the app root.
   useEffect(() => {
@@ -318,4 +415,42 @@ export default function WorldMap({
       )}
     </div>
   );
+}
+
+const MY_COLOR = "#ffffff";
+const THEIR_COLOR = "#ffb547";
+
+const EMPTY_LINE: GeoJSON.FeatureCollection = {
+  type: "FeatureCollection",
+  features: [],
+};
+
+// Glow + core line for the you ↔ stranger arc; data is set per connection.
+function addLinkLayers(map: MapboxMap) {
+  if (map.getSource("link")) return;
+  // lineMetrics enables line-progress, needed for the gradient.
+  map.addSource("link", { type: "geojson", data: EMPTY_LINE, lineMetrics: true });
+  map.addLayer({
+    id: "link-glow",
+    type: "line",
+    source: "link",
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: {
+      "line-color": THEIR_COLOR,
+      "line-width": 12,
+      "line-blur": 10,
+      "line-opacity": 0.3,
+    },
+  });
+  map.addLayer({
+    id: "link-line",
+    type: "line",
+    source: "link",
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: {
+      "line-width": 2.5,
+      // Set per link: white at your end, warm amber at theirs.
+      "line-gradient": ["interpolate", ["linear"], ["line-progress"], 0, MY_COLOR, 1, THEIR_COLOR],
+    },
+  });
 }
